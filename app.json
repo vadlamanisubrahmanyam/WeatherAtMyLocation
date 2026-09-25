@@ -5,7 +5,6 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "scheme": "weatheratmylocation",
     "userInterfaceStyle": "dark",
     "newArchEnabled": false,
     "splash": {
@@ -25,9 +24,6 @@
         "android.permission.INTERNET"
       ],
       "versionCode": 1
-    },
-    "plugins": [
-      "expo-router"
-    ]
+    }
   }
 }
