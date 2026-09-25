@@ -11,11 +11,11 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      # ── 1. Checkout ──────────────────────────────────────────────
+      # ── 1. Checkout ───────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── 2. Node & Java ───────────────────────────────────────────
+      # ── 2. Node & Java ────────────────────────────────────────────
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
@@ -31,11 +31,11 @@ jobs:
       - name: Install npm dependencies
         run: npm install
 
-      # ── 4. Expo prebuild ─────────────────────────────────────────
+      # ── 4. Expo prebuild ──────────────────────────────────────────
       - name: Expo prebuild (clean)
         run: npx expo prebuild --clean --platform android
 
-      # ── 5. Generate OR restore keystore ──────────────────────────
+      # ── 5. Generate OR restore keystore ───────────────────────────
       - name: Generate or restore keystore
         run: |
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
@@ -60,8 +60,16 @@ jobs:
             echo "════════════════════════════════════════════════════"
           fi
 
-      # ── 6. Write gradle.properties signing config ─────────────────
-      - name: Write signing properties
+      # ── 6. Inject signing config using Python (safe, no sed) ──────
+      #
+      # SDK 53 prebuild already writes a signingConfigs { debug { } }
+      # block. We use Python to:
+      #   a) add gradle.properties signing entries
+      #   b) replace signingConfigs.debug with signingConfigs.release
+      #      inside the release buildType (the only safe way to do this)
+      #   c) append a release signingConfigs entry to the existing block
+      #
+      - name: Inject release signing config
         run: |
           ALIAS="${{ secrets.KEY_ALIAS }}"
           STORE_PASS="${{ secrets.KEYSTORE_PASSWORD }}"
@@ -70,56 +78,79 @@ jobs:
           [ -z "$STORE_PASS" ] && STORE_PASS="weatherKey2024"
           [ -z "$KEY_PASS" ]   && KEY_PASS="weatherKey2024"
 
-          cat >> android/gradle.properties << EOF
+          python3 << PYEOF
+          import re
+
+          # ── gradle.properties ─────────────────────────────────────
+          with open("android/gradle.properties", "a") as f:
+              f.write("""
           MYAPP_RELEASE_STORE_FILE=release.keystore
           MYAPP_RELEASE_KEY_ALIAS=${ALIAS}
           MYAPP_RELEASE_STORE_PASSWORD=${STORE_PASS}
           MYAPP_RELEASE_KEY_PASSWORD=${KEY_PASS}
-          EOF
+          """)
+          print("✓ gradle.properties updated")
 
-      # ── 7. Patch app/build.gradle with signingConfig ─────────────
-      # SDK 53 / RN 0.76 uses AGP 8.x — signingConfigs must go
-      # inside the android {} block, before buildTypes.
-      - name: Patch build.gradle with signingConfig
+          # ── app/build.gradle ──────────────────────────────────────
+          with open("android/app/build.gradle", "r") as f:
+              content = f.read()
+
+          # 1. Add release block inside the existing signingConfigs { }
+          #    We find the closing brace of the debug { } block and
+          #    insert after it, still inside signingConfigs { }.
+          release_block = """
+              release {
+                  storeFile file(MYAPP_RELEASE_STORE_FILE)
+                  storePassword MYAPP_RELEASE_STORE_PASSWORD
+                  keyAlias MYAPP_RELEASE_KEY_ALIAS
+                  keyPassword MYAPP_RELEASE_KEY_PASSWORD
+              }"""
+
+          # Insert release signing config after the debug block (inside signingConfigs)
+          content = re.sub(
+              r'(signingConfigs\s*\{.*?debug\s*\{.*?\})',
+              r'\1' + release_block,
+              content,
+              count=1,
+              flags=re.DOTALL
+          )
+
+          # 2. Point the release buildType at signingConfigs.release
+          #    (prebuild sets it to signingConfigs.debug by default)
+          content = re.sub(
+              r'(buildTypes\s*\{.*?release\s*\{.*?)signingConfig\s+signingConfigs\.debug',
+              r'\1signingConfig signingConfigs.release',
+              content,
+              count=1,
+              flags=re.DOTALL
+          )
+
+          with open("android/app/build.gradle", "w") as f:
+              f.write(content)
+          print("✓ app/build.gradle patched")
+
+          # ── verify ────────────────────────────────────────────────
+          with open("android/app/build.gradle", "r") as f:
+              verify = f.read()
+          assert "signingConfigs.release" in verify, "signingConfig not set to release!"
+          assert "MYAPP_RELEASE_STORE_FILE" in verify, "store file not found!"
+          print("✓ Verification passed")
+          PYEOF
+
+      # ── 7. Show final build.gradle for debugging ──────────────────
+      - name: Show patched build.gradle
         run: |
-          GRADLE_FILE="android/app/build.gradle"
+          echo "--- android/app/build.gradle ---"
+          cat android/app/build.gradle
 
-          # Insert signingConfigs block before buildTypes
-          sed -i '/buildTypes {/i\
-              signingConfigs {\
-                  release {\
-                      storeFile file(MYAPP_RELEASE_STORE_FILE)\
-                      storePassword MYAPP_RELEASE_STORE_PASSWORD\
-                      keyAlias MYAPP_RELEASE_KEY_ALIAS\
-                      keyPassword MYAPP_RELEASE_KEY_PASSWORD\
-                  }\
-              }' "$GRADLE_FILE"
-
-          # Add signingConfig reference inside release buildType
-          sed -i '/buildTypes {/,/}/ s/release {/release {\n                signingConfig signingConfigs.release/' "$GRADLE_FILE"
-
-          echo "--- Patched build.gradle excerpt ---"
-          grep -A 20 "signingConfigs" "$GRADLE_FILE" | head -30
-
-      # ── 8. Pin compileSdkVersion & Kotlin ────────────────────────
-      # SDK 53 targets compileSdk 35; Kotlin 1.9.24 is stable with it
-      - name: Pin SDK and Kotlin versions
-        run: |
-          # Pin compileSdk to 35 for SDK 53
-          sed -i 's/compileSdkVersion = .*/compileSdkVersion = 35/' android/build.gradle || true
-          sed -i 's/targetSdkVersion = .*/targetSdkVersion = 35/' android/build.gradle   || true
-          sed -i 's/kotlinVersion = .*/kotlinVersion = "1.9.24"/' android/build.gradle   || true
-          echo "--- build.gradle versions ---"
-          grep -E "compileSdk|targetSdk|kotlinVersion" android/build.gradle || true
-
-      # ── 9. Build release APK ─────────────────────────────────────
+      # ── 8. Build release APK ──────────────────────────────────────
       - name: Build release APK
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon --stacktrace
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m"
 
-      # ── 10. Upload APK artifact ───────────────────────────────────
+      # ── 9. Upload APK ─────────────────────────────────────────────
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
