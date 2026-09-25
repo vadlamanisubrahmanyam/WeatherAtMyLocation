@@ -28,12 +28,15 @@ jobs:
           java-version: '17'
 
       # ── 3. Install dependencies ───────────────────────────────────
+      # --legacy-peer-deps avoids peer dep conflicts across RN 0.79 ecosystem
       - name: Install npm dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       # ── 4. Expo prebuild ──────────────────────────────────────────
       - name: Expo prebuild (clean)
         run: npx expo prebuild --clean --platform android
+        env:
+          NODE_ENV: production
 
       # ── 5. Generate OR restore keystore ───────────────────────────
       - name: Generate or restore keystore
@@ -60,13 +63,12 @@ jobs:
             echo "════════════════════════════════════════════════════"
           fi
 
-      # ── 6. Patch build.gradle ─────────────────────────────────────
+      # ── 6. Patch app/build.gradle ─────────────────────────────────
       #
-      # Three fixes applied line-by-line with brace tracking:
-      #
-      # a) Strip enableBundleCompression (removed in RN 0.76)
-      # b) Insert release {} inside signingConfigs {}, after debug {} closes
-      # c) Switch signingConfig in release buildType ONLY (not debug)
+      # RN 0.79 prebuild generates a build.gradle that still has
+      # enableBundleCompression in the react{} block — this property
+      # was removed from ReactExtension. Strip it before Gradle runs.
+      # Also inject the release signingConfig correctly.
       #
       - name: Patch build.gradle
         run: |
@@ -92,13 +94,15 @@ jobs:
           while i < len(lines):
               line = lines[i]
 
-              # a) Strip enableBundleCompression (not in RN 0.76 ReactExtension)
+              # a) Strip enableBundleCompression (removed from ReactExtension in RN 0.76+)
               if 'enableBundleCompression' in line:
                   print(f"  stripped: {line.rstrip()}")
                   i += 1
                   continue
 
-              # b) Inject release signingConfig block after debug{} closes
+              # b) Inject release signingConfig after the debug{} block closes
+              #    inside signingConfigs{} — using brace-depth tracking,
+              #    never regex on multi-line blocks.
               if 'signingConfigs {' in line and 'buildTypes' not in line:
                   out.append(line)
                   i += 1
@@ -110,6 +114,8 @@ jobs:
                       closes = l.count('}')
                       depth += opens - closes
                       out.append(l)
+                      # depth==1 means we're back at signingConfigs level
+                      # (debug block just closed)
                       if not debug_closed and depth == 1 and closes > 0:
                           debug_closed = True
                           out.append(
@@ -120,21 +126,28 @@ jobs:
                               f'            keyPassword "{key_pass}"\n'
                               f'        }}\n'
                           )
-                          print("  injected: release signingConfig block")
+                          print("  injected: release signingConfig block after debug{}")
                       i += 1
                   continue
 
-              # c) Track entry/exit of release buildType block
-              if 'release {' in line and 'signingConfigs' not in line:
+              # c) Track when we enter the release buildType block
+              #    Guard: 'signingConfigs' not in line avoids false match
+              #    on "release {" inside signingConfigs we already processed
+              if 'release {' in line and 'signingConfigs' not in line and not in_release_buildtype:
                   in_release_buildtype = True
                   release_brace_depth  = 1
 
+              # d) While inside release buildType, track depth to know when we exit
               if in_release_buildtype:
-                  release_brace_depth += line.count('{') - line.count('}')
+                  opens  = line.count('{')
+                  closes = line.count('}')
+                  # Only count braces after the opening line itself
+                  if release_brace_depth > 1 or 'release {' not in line:
+                      release_brace_depth += opens - closes
                   if release_brace_depth <= 0:
                       in_release_buildtype = False
 
-              # d) Switch signingConfig ONLY inside release buildType
+              # e) Switch signingConfig ONLY inside release buildType
               if 'signingConfig signingConfigs.debug' in line and in_release_buildtype:
                   line = line.replace('signingConfigs.debug', 'signingConfigs.release')
                   print("  switched: release buildType → signingConfigs.release")
@@ -146,14 +159,14 @@ jobs:
               f.writelines(out)
 
           result = "".join(out)
-          assert 'enableBundleCompression'          not in result, "FAIL: enableBundleCompression still present"
-          assert 'signingConfigs.release'            in result,    "FAIL: signingConfigs.release not found"
-          assert 'storeFile file("release.keystore")' in result,  "FAIL: storeFile not found"
-          assert 'signingConfig signingConfigs.debug' in result,  "FAIL: debug buildType was also changed"
-          print("✓ All assertions passed")
+          assert 'enableBundleCompression'             not in result, "FAIL: enableBundleCompression still present"
+          assert 'signingConfigs.release'               in result,    "FAIL: signingConfigs.release not found"
+          assert 'storeFile file("release.keystore")'  in result,    "FAIL: storeFile not found"
+          assert 'signingConfig signingConfigs.debug'   in result,    "FAIL: debug buildType was also changed"
+          print("✓ All 4 assertions passed")
           PYEOF
 
-      # ── 7. Show patched build.gradle ─────────────────────────────
+      # ── 7. Show final build.gradle ────────────────────────────────
       - name: Show patched build.gradle
         run: cat android/app/build.gradle
 
@@ -162,6 +175,7 @@ jobs:
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon --stacktrace
         env:
+          NODE_ENV: production
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m"
 
       # ── 9. Upload APK ─────────────────────────────────────────────
