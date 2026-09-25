@@ -60,16 +60,20 @@ jobs:
             echo "════════════════════════════════════════════════════"
           fi
 
-      # ── 6. Inject signing config using Python (safe, no sed) ──────
+      # ── 6. Patch build.gradle (Python — safe, no sed) ─────────────
       #
-      # SDK 53 prebuild already writes a signingConfigs { debug { } }
-      # block. We use Python to:
-      #   a) add gradle.properties signing entries
-      #   b) replace signingConfigs.debug with signingConfigs.release
-      #      inside the release buildType (the only safe way to do this)
-      #   c) append a release signingConfigs entry to the existing block
+      # Three things to fix in the prebuild-generated app/build.gradle:
       #
-      - name: Inject release signing config
+      # a) enableBundleCompression — removed in RN 0.76, but Expo 53's
+      #    prebuild template still emits it → strip the line entirely.
+      #
+      # b) Add release signing config inside the existing
+      #    signingConfigs { debug { } } block (not a new block).
+      #
+      # c) Switch the release buildType from signingConfigs.debug
+      #    to signingConfigs.release.
+      #
+      - name: Patch build.gradle
         run: |
           ALIAS="${{ secrets.KEY_ALIAS }}"
           STORE_PASS="${{ secrets.KEYSTORE_PASSWORD }}"
@@ -78,72 +82,56 @@ jobs:
           [ -z "$STORE_PASS" ] && STORE_PASS="weatherKey2024"
           [ -z "$KEY_PASS" ]   && KEY_PASS="weatherKey2024"
 
-          python3 << PYEOF
-          import re
+          python3 - "$ALIAS" "$STORE_PASS" "$KEY_PASS" << 'PYEOF'
+          import re, sys
+          alias, store_pass, key_pass = sys.argv[1], sys.argv[2], sys.argv[3]
 
-          # ── gradle.properties ─────────────────────────────────────
-          with open("android/gradle.properties", "a") as f:
-              f.write("""
-          MYAPP_RELEASE_STORE_FILE=release.keystore
-          MYAPP_RELEASE_KEY_ALIAS=${ALIAS}
-          MYAPP_RELEASE_STORE_PASSWORD=${STORE_PASS}
-          MYAPP_RELEASE_KEY_PASSWORD=${KEY_PASS}
-          """)
-          print("✓ gradle.properties updated")
-
-          # ── app/build.gradle ──────────────────────────────────────
           with open("android/app/build.gradle", "r") as f:
               content = f.read()
 
-          # 1. Add release block inside the existing signingConfigs { }
-          #    We find the closing brace of the debug { } block and
-          #    insert after it, still inside signingConfigs { }.
-          release_block = """
-              release {
-                  storeFile file(MYAPP_RELEASE_STORE_FILE)
-                  storePassword MYAPP_RELEASE_STORE_PASSWORD
-                  keyAlias MYAPP_RELEASE_KEY_ALIAS
-                  keyPassword MYAPP_RELEASE_KEY_PASSWORD
-              }"""
+          # a) Remove enableBundleCompression line (not in RN 0.76)
+          content = re.sub(r'[ \t]*enableBundleCompression\s*=.*\n', '', content)
+          print("✓ Removed enableBundleCompression")
 
-          # Insert release signing config after the debug block (inside signingConfigs)
+          # b) Insert release signingConfig inside existing signingConfigs block
+          release_signing = f"""
+              release {{
+                  storeFile file("release.keystore")
+                  storePassword "{store_pass}"
+                  keyAlias "{alias}"
+                  keyPassword "{key_pass}"
+              }}"""
+          # Find signingConfigs { ... } and append release block before closing brace
           content = re.sub(
-              r'(signingConfigs\s*\{.*?debug\s*\{.*?\})',
-              r'\1' + release_block,
-              content,
-              count=1,
-              flags=re.DOTALL
+              r'(signingConfigs\s*\{)(.*?)(^\s*\})',
+              lambda m: m.group(1) + m.group(2) + release_signing + '\n' + m.group(3),
+              content, count=1, flags=re.DOTALL | re.MULTILINE
           )
+          print("✓ Added release signingConfig")
 
-          # 2. Point the release buildType at signingConfigs.release
-          #    (prebuild sets it to signingConfigs.debug by default)
+          # c) Point release buildType to signingConfigs.release
           content = re.sub(
               r'(buildTypes\s*\{.*?release\s*\{.*?)signingConfig\s+signingConfigs\.debug',
               r'\1signingConfig signingConfigs.release',
-              content,
-              count=1,
-              flags=re.DOTALL
+              content, count=1, flags=re.DOTALL
           )
+          print("✓ Switched release buildType to signingConfigs.release")
 
           with open("android/app/build.gradle", "w") as f:
               f.write(content)
-          print("✓ app/build.gradle patched")
 
-          # ── verify ────────────────────────────────────────────────
-          with open("android/app/build.gradle", "r") as f:
-              verify = f.read()
-          assert "signingConfigs.release" in verify, "signingConfig not set to release!"
-          assert "MYAPP_RELEASE_STORE_FILE" in verify, "store file not found!"
-          print("✓ Verification passed")
+          # Verify
+          assert "enableBundleCompression" not in content, "enableBundleCompression still present!"
+          assert "signingConfigs.release" in content,      "signingConfigs.release not found!"
+          assert 'storeFile file("release.keystore")' in content, "storeFile not found!"
+          print("✓ All assertions passed")
           PYEOF
 
-      # ── 7. Show final build.gradle for debugging ──────────────────
+      # ── 7. Show patched build.gradle ─────────────────────────────
       - name: Show patched build.gradle
-        run: |
-          echo "--- android/app/build.gradle ---"
-          cat android/app/build.gradle
+        run: cat android/app/build.gradle
 
-      # ── 8. Build release APK ──────────────────────────────────────
+      # ── 8. Build release APK ─────────────────────────────────────
       - name: Build release APK
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon --stacktrace
