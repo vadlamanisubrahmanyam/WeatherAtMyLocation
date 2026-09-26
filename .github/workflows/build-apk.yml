@@ -28,7 +28,6 @@ jobs:
           java-version: '17'
 
       # ── 3. Install dependencies ───────────────────────────────────
-      # --legacy-peer-deps avoids peer dep conflicts across RN 0.79 ecosystem
       - name: Install npm dependencies
         run: npm install --legacy-peer-deps
 
@@ -38,7 +37,34 @@ jobs:
         env:
           NODE_ENV: production
 
-      # ── 5. Generate OR restore keystore ───────────────────────────
+      # ── 5. Inject network security config ─────────────────────────
+      # Allows the local file:// WebView to call https:// APIs on all
+      # Android versions. Also prevents ERR_CLEARTEXT_NOT_PERMITTED.
+      - name: Inject network security config
+        run: |
+          mkdir -p android/app/src/main/res/xml
+
+          cat > android/app/src/main/res/xml/network_security_config.xml << 'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <network-security-config>
+              <base-config cleartextTrafficPermitted="true">
+                  <trust-anchors>
+                      <certificates src="system" />
+                  </trust-anchors>
+              </base-config>
+          </network-security-config>
+          XML
+
+          # Reference it in AndroidManifest.xml
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "networkSecurityConfig" "$MANIFEST"; then
+            sed -i 's/<application/<application android:networkSecurityConfig="@xml\/network_security_config"/' "$MANIFEST"
+            echo "✓ network_security_config injected into AndroidManifest"
+          else
+            echo "✓ networkSecurityConfig already present"
+          fi
+
+      # ── 6. Generate OR restore keystore ───────────────────────────
       - name: Generate or restore keystore
         run: |
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
@@ -63,13 +89,7 @@ jobs:
             echo "════════════════════════════════════════════════════"
           fi
 
-      # ── 6. Patch app/build.gradle ─────────────────────────────────
-      #
-      # RN 0.79 prebuild generates a build.gradle that still has
-      # enableBundleCompression in the react{} block — this property
-      # was removed from ReactExtension. Strip it before Gradle runs.
-      # Also inject the release signingConfig correctly.
-      #
+      # ── 7. Patch app/build.gradle ─────────────────────────────────
       - name: Patch build.gradle
         run: |
           ALIAS="${{ secrets.KEY_ALIAS }}"
@@ -100,9 +120,7 @@ jobs:
                   i += 1
                   continue
 
-              # b) Inject release signingConfig after the debug{} block closes
-              #    inside signingConfigs{} — using brace-depth tracking,
-              #    never regex on multi-line blocks.
+              # b) Inject release signingConfig after debug{} closes inside signingConfigs{}
               if 'signingConfigs {' in line and 'buildTypes' not in line:
                   out.append(line)
                   i += 1
@@ -114,8 +132,6 @@ jobs:
                       closes = l.count('}')
                       depth += opens - closes
                       out.append(l)
-                      # depth==1 means we're back at signingConfigs level
-                      # (debug block just closed)
                       if not debug_closed and depth == 1 and closes > 0:
                           debug_closed = True
                           out.append(
@@ -130,24 +146,20 @@ jobs:
                       i += 1
                   continue
 
-              # c) Track when we enter the release buildType block
-              #    Guard: 'signingConfigs' not in line avoids false match
-              #    on "release {" inside signingConfigs we already processed
+              # c) Track release buildType entry (not signingConfigs)
               if 'release {' in line and 'signingConfigs' not in line and not in_release_buildtype:
                   in_release_buildtype = True
                   release_brace_depth  = 1
 
-              # d) While inside release buildType, track depth to know when we exit
               if in_release_buildtype:
                   opens  = line.count('{')
                   closes = line.count('}')
-                  # Only count braces after the opening line itself
                   if release_brace_depth > 1 or 'release {' not in line:
                       release_brace_depth += opens - closes
                   if release_brace_depth <= 0:
                       in_release_buildtype = False
 
-              # e) Switch signingConfig ONLY inside release buildType
+              # d) Switch signingConfig ONLY inside release buildType
               if 'signingConfig signingConfigs.debug' in line and in_release_buildtype:
                   line = line.replace('signingConfigs.debug', 'signingConfigs.release')
                   print("  switched: release buildType → signingConfigs.release")
@@ -166,11 +178,11 @@ jobs:
           print("✓ All 4 assertions passed")
           PYEOF
 
-      # ── 7. Show final build.gradle ────────────────────────────────
+      # ── 8. Show patched build.gradle ─────────────────────────────
       - name: Show patched build.gradle
         run: cat android/app/build.gradle
 
-      # ── 8. Build release APK ─────────────────────────────────────
+      # ── 9. Build release APK ─────────────────────────────────────
       - name: Build release APK
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon --stacktrace
@@ -178,7 +190,7 @@ jobs:
           NODE_ENV: production
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m"
 
-      # ── 9. Upload APK ─────────────────────────────────────────────
+      # ── 10. Upload APK ────────────────────────────────────────────
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
