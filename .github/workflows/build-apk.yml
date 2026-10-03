@@ -37,34 +37,7 @@ jobs:
         env:
           NODE_ENV: production
 
-      # ── 5. Inject network security config ─────────────────────────
-      # Allows the local file:// WebView to call https:// APIs on all
-      # Android versions. Also prevents ERR_CLEARTEXT_NOT_PERMITTED.
-      - name: Inject network security config
-        run: |
-          mkdir -p android/app/src/main/res/xml
-
-          cat > android/app/src/main/res/xml/network_security_config.xml << 'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <network-security-config>
-              <base-config cleartextTrafficPermitted="true">
-                  <trust-anchors>
-                      <certificates src="system" />
-                  </trust-anchors>
-              </base-config>
-          </network-security-config>
-          XML
-
-          # Reference it in AndroidManifest.xml
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if ! grep -q "networkSecurityConfig" "$MANIFEST"; then
-            sed -i 's/<application/<application android:networkSecurityConfig="@xml\/network_security_config"/' "$MANIFEST"
-            echo "✓ network_security_config injected into AndroidManifest"
-          else
-            echo "✓ networkSecurityConfig already present"
-          fi
-
-      # ── 6. Generate OR restore keystore ───────────────────────────
+      # ── 5. Generate OR restore keystore ───────────────────────────
       - name: Generate or restore keystore
         run: |
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
@@ -89,7 +62,7 @@ jobs:
             echo "════════════════════════════════════════════════════"
           fi
 
-      # ── 7. Patch app/build.gradle ─────────────────────────────────
+      # ── 6. Patch app/build.gradle ─────────────────────────────────
       - name: Patch build.gradle
         run: |
           ALIAS="${{ secrets.KEY_ALIAS }}"
@@ -114,13 +87,13 @@ jobs:
           while i < len(lines):
               line = lines[i]
 
-              # a) Strip enableBundleCompression (removed from ReactExtension in RN 0.76+)
+              # a) Strip enableBundleCompression (removed in RN 0.76+)
               if 'enableBundleCompression' in line:
                   print(f"  stripped: {line.rstrip()}")
                   i += 1
                   continue
 
-              # b) Inject release signingConfig after debug{} closes inside signingConfigs{}
+              # b) Inject release signingConfig after debug{} closes
               if 'signingConfigs {' in line and 'buildTypes' not in line:
                   out.append(line)
                   i += 1
@@ -142,11 +115,11 @@ jobs:
                               f'            keyPassword "{key_pass}"\n'
                               f'        }}\n'
                           )
-                          print("  injected: release signingConfig block after debug{}")
+                          print("  injected: release signingConfig block")
                       i += 1
                   continue
 
-              # c) Track release buildType entry (not signingConfigs)
+              # c) Track release buildType entry
               if 'release {' in line and 'signingConfigs' not in line and not in_release_buildtype:
                   in_release_buildtype = True
                   release_brace_depth  = 1
@@ -178,11 +151,11 @@ jobs:
           print("✓ All 4 assertions passed")
           PYEOF
 
-      # ── 8. Show patched build.gradle ─────────────────────────────
+      # ── 7. Show patched build.gradle ─────────────────────────────
       - name: Show patched build.gradle
         run: cat android/app/build.gradle
 
-      # ── 9. Build release APK ─────────────────────────────────────
+      # ── 8. Build release APK ─────────────────────────────────────
       - name: Build release APK
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon --stacktrace
@@ -190,7 +163,7 @@ jobs:
           NODE_ENV: production
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m"
 
-      # ── 10. Upload APK ────────────────────────────────────────────
+      # ── 9. Upload APK ─────────────────────────────────────────────
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
