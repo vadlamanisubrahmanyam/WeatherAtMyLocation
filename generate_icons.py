@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3 
 """
 Generates icon.png (1024x1024), adaptive-icon.png (1024x1024),
 and splash.png (1284x2778) for WeatherAtMyLocation.
