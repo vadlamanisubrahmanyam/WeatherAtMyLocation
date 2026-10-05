@@ -2,11 +2,6 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
-// HTML is embedded directly as a string — no file:// loading,
-// no asset resolution, no network security config needed.
-// baseUrl https://localhost gives it a secure origin so all
-// HTTPS API calls (Open-Meteo, Nominatim) work without any
-// cleartext or mixed-content restrictions on Android.
 const WEATHER_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -49,6 +44,7 @@ const WEATHER_HTML = `<!DOCTYPE html>
   }
   .logo { font-family:'Syne',sans-serif; font-size:1.4rem; font-weight:800; letter-spacing:-0.5px; }
   .logo span { color:var(--aurora-1); }
+  .logo-byline { font-size:0.62rem; font-weight:400; color:var(--text-muted); letter-spacing:0.3px; margin-top:1px; font-family:'Space Grotesk',sans-serif; }
   .nav-tabs { display:flex; gap:4px; background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:30px; padding:4px; }
   .nav-tab { padding:6px 20px; border-radius:26px; border:none; background:transparent; color:var(--text-muted); font-family:'Space Grotesk',sans-serif; font-size:0.85rem; font-weight:500; cursor:pointer; transition:all 0.2s; }
   .nav-tab.active { background:var(--aurora-1); color:var(--sky-deep); }
@@ -133,13 +129,37 @@ const WEATHER_HTML = `<!DOCTYPE html>
 
   /* AIR QUALITY */
   .aqi-section { padding:0 24px 32px; }
-  .aqi-band { display:flex; align-items:center; gap:12px; background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:16px; padding:16px; }
-  .aqi-swatch { width:48px; height:48px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:1.3rem; font-weight:800; flex-shrink:0; }
+  .aqi-band { background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:16px; padding:16px; }
+  .aqi-top { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+  .aqi-swatch { width:52px; height:52px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:1.4rem; font-weight:800; flex-shrink:0; }
   .aqi-info .aqi-num { font-size:1.8rem; font-weight:700; }
   .aqi-info .aqi-label { font-size:0.8rem; color:var(--text-muted); }
-  .aqi-details { display:flex; gap:16px; margin-top:8px; flex-wrap:wrap; }
+  /* AQI gradient scale bar */
+  .aqi-scale-wrap { margin-bottom:14px; }
+  .aqi-scale-track {
+    position:relative; height:8px; border-radius:4px; margin-bottom:4px;
+    background: linear-gradient(to right,
+      #06d6a0 0%, #06d6a0 20%,
+      #ffd166 20%, #ffd166 40%,
+      #f4a261 40%, #f4a261 60%,
+      #e63946 60%, #e63946 80%,
+      #6a0572 80%, #6a0572 100%);
+  }
+  .aqi-needle {
+    position:absolute; top:-4px; width:16px; height:16px;
+    border-radius:50%; border:2px solid #fff;
+    transform:translateX(-50%);
+    transition:left 0.8s ease;
+    box-shadow:0 2px 6px rgba(0,0,0,0.4);
+  }
+  .aqi-scale-labels { display:flex; justify-content:space-between; font-size:0.62rem; color:var(--text-muted); }
+  /* Pollutant rows */
+  .aqi-details { display:flex; flex-direction:column; gap:8px; }
   .aqi-detail { font-size:0.75rem; color:var(--text-muted); }
-  .aqi-detail span { color:var(--text-primary); font-weight:600; }
+  .aqi-detail-header { display:flex; justify-content:space-between; margin-bottom:3px; }
+  .aqi-detail-header span { color:var(--text-primary); font-weight:600; }
+  .aqi-detail-bar { height:4px; border-radius:2px; background:var(--glass-border); overflow:hidden; }
+  .aqi-detail-fill { height:100%; border-radius:2px; transition:width 0.8s ease; }
 
   /* ====== NEWS PAGE ====== */
   .news-container { padding:24px; max-width:860px; margin:0 auto; }
@@ -190,6 +210,10 @@ const WEATHER_HTML = `<!DOCTYPE html>
   #notif-bar { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:200; display:none; padding:12px 20px; background:#1a3a6e; border:1px solid var(--aurora-1); border-radius:30px; font-size:0.85rem; color:var(--aurora-1); box-shadow:0 8px 32px rgba(0,0,0,0.4); white-space:nowrap; animation:slide-up 0.3s ease; }
   @keyframes slide-up { from{transform:translateX(-50%) translateY(20px);opacity:0} to{transform:translateX(-50%) translateY(0);opacity:1} }
 
+  /* STAT RANGE LABELS */
+  .stat-range { display:flex; justify-content:space-between; font-size:0.62rem; color:var(--text-muted); margin-top:3px; }
+  .stat-range .range-val { font-weight:600; color:var(--aurora-1); }
+
   /* WIND COMPASS */
   .compass-wrap { display:flex; flex-direction:column; align-items:center; }
   .compass { width:50px; height:50px; position:relative; border-radius:50%; border:1px solid var(--glass-border); display:flex; align-items:center; justify-content:center; margin:0 auto 4px; }
@@ -200,7 +224,7 @@ const WEATHER_HTML = `<!DOCTYPE html>
 
 <!-- NAV -->
 <nav>
-  <div class="logo">Sky<span>Pulse</span></div>
+  <div class="logo">Sky<span>Pulse</span><div class="logo-byline">by Subrahmanyam</div></div>
   <div class="nav-tabs">
     <button class="nav-tab active" onclick="switchPage('weather')">⛅ Weather</button>
     <button class="nav-tab" onclick="switchPage('news')">📰 News</button>
@@ -245,6 +269,7 @@ const WEATHER_HTML = `<!DOCTYPE html>
         <div class="stat-label">💧 Humidity</div>
         <div class="stat-value"><span id="humidity">--</span><span class="stat-unit">%</span></div>
         <div class="stat-bar"><div class="stat-bar-fill" id="humidity-bar" style="width:0%;background:var(--aurora-1)"></div></div>
+        <div class="stat-range"><span>0%</span><span id="humidity-status" class="range-val">—</span><span>100%</span></div>
       </div>
       <div class="stat-card">
         <div class="stat-label">🌬 Wind</div>
@@ -253,11 +278,13 @@ const WEATHER_HTML = `<!DOCTYPE html>
           <div class="compass"><span class="compass-arrow" id="wind-dir-arrow">↑</span></div>
           <span style="font-size:0.72rem;color:var(--text-muted)" id="wind-dir-text">N</span>
         </div>
+        <div class="stat-range" style="margin-top:6px"><span>Calm</span><span id="wind-status" class="range-val">—</span><span>Storm</span></div>
       </div>
       <div class="stat-card">
         <div class="stat-label">👁 Visibility</div>
         <div class="stat-value"><span id="visibility">--</span><span class="stat-unit" id="vis-unit"> km</span></div>
         <div class="stat-bar"><div class="stat-bar-fill" id="vis-bar" style="width:0%;background:var(--aurora-2)"></div></div>
+        <div class="stat-range"><span id="vis-min">0</span><span id="vis-status" class="range-val">—</span><span id="vis-max">20 km</span></div>
       </div>
       <div class="stat-card">
         <div class="stat-label">🌡 Pressure</div>
@@ -266,9 +293,10 @@ const WEATHER_HTML = `<!DOCTYPE html>
       </div>
       <div class="stat-card">
         <div class="stat-label">☀️ UV Index</div>
-        <div class="stat-value"><span id="uv-val">--</span></div>
+        <div class="stat-value"><span id="uv-val">--</span><span class="stat-unit"> / 12</span></div>
         <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px" id="uv-label">—</div>
         <div class="stat-bar"><div class="stat-bar-fill" id="uv-bar" style="width:0%;background:var(--aurora-3)"></div></div>
+        <div class="stat-range"><span>0 Low</span><span id="uv-status" class="range-val">—</span><span>12 Ext</span></div>
       </div>
       <div class="stat-card">
         <div class="stat-label">🌧 Precipitation</div>
@@ -292,19 +320,52 @@ const WEATHER_HTML = `<!DOCTYPE html>
 
   <!-- AIR QUALITY -->
   <div class="aqi-section">
-    <div class="section-label">Air Quality</div>
+    <div class="section-label">Air Quality Index</div>
     <div class="aqi-band">
-      <div class="aqi-swatch" id="aqi-swatch">--</div>
-      <div class="aqi-info">
-        <div class="aqi-num"><span id="aqi-val">--</span> <span style="font-size:0.8rem;color:var(--text-muted)">AQI</span></div>
-        <div class="aqi-label" id="aqi-label">Loading pollution data…</div>
-        <div class="aqi-details">
-          <div class="aqi-detail">PM2.5 <span id="pm25">--</span> μg</div>
-          <div class="aqi-detail">PM10 <span id="pm10">--</span> μg</div>
-          <div class="aqi-detail">NO₂ <span id="no2">--</span> μg</div>
-          <div class="aqi-detail">O₃ <span id="o3">--</span> μg</div>
+
+      <!-- Top: swatch + number + label -->
+      <div class="aqi-top">
+        <div class="aqi-swatch" id="aqi-swatch">--</div>
+        <div class="aqi-info">
+          <div class="aqi-num"><span id="aqi-val">--</span> <span style="font-size:0.8rem;color:var(--text-muted)">/ 300 AQI</span></div>
+          <div class="aqi-label" id="aqi-label">Loading pollution data…</div>
         </div>
       </div>
+
+      <!-- Gradient scale bar with needle -->
+      <div class="aqi-scale-wrap">
+        <div class="aqi-scale-track">
+          <div class="aqi-needle" id="aqi-needle" style="left:0%;background:#06d6a0"></div>
+        </div>
+        <div class="aqi-scale-labels">
+          <span>0 Good</span>
+          <span>51 Mod</span>
+          <span>101 USG</span>
+          <span>151 Bad</span>
+          <span>201+</span>
+        </div>
+      </div>
+
+      <!-- Pollutant bars -->
+      <div class="aqi-details">
+        <div class="aqi-detail">
+          <div class="aqi-detail-header">PM2.5 <span><span id="pm25">--</span> μg/m³ <span id="pm25-limit" style="color:var(--text-muted);font-weight:400">/ 25 safe</span></span></div>
+          <div class="aqi-detail-bar"><div class="aqi-detail-fill" id="pm25-bar" style="width:0%"></div></div>
+        </div>
+        <div class="aqi-detail">
+          <div class="aqi-detail-header">PM10 <span><span id="pm10">--</span> μg/m³ <span id="pm10-limit" style="color:var(--text-muted);font-weight:400">/ 50 safe</span></span></div>
+          <div class="aqi-detail-bar"><div class="aqi-detail-fill" id="pm10-bar" style="width:0%"></div></div>
+        </div>
+        <div class="aqi-detail">
+          <div class="aqi-detail-header">NO₂ <span><span id="no2">--</span> μg/m³ <span style="color:var(--text-muted);font-weight:400">/ 40 safe</span></span></div>
+          <div class="aqi-detail-bar"><div class="aqi-detail-fill" id="no2-bar" style="width:0%"></div></div>
+        </div>
+        <div class="aqi-detail">
+          <div class="aqi-detail-header">O₃ <span><span id="o3">--</span> μg/m³ <span style="color:var(--text-muted);font-weight:400">/ 100 safe</span></span></div>
+          <div class="aqi-detail-bar"><div class="aqi-detail-fill" id="o3-bar" style="width:0%"></div></div>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -417,11 +478,21 @@ async function fetchWeather() {
     weatherData = data;
 
     // Reverse geocode with nominatim
-    const geo = await fetch(\`https://nominatim.openstreetmap.org/reverse?lat=\${lat}&lon=\${lon}&format=json\`);
+    const geo = await fetch(\`https://nominatim.openstreetmap.org/reverse?lat=\${lat}&lon=\${lon}&format=json&zoom=14\`);
     const geoData = await geo.json();
-    const city = geoData.address.city || geoData.address.town || geoData.address.village || geoData.address.county || 'Your Location';
-    const country = geoData.address.country_code?.toUpperCase() || '';
-    data._location = \`\${city}, \${country}\`;
+    const a = geoData.address;
+    // Layer 1: most specific neighbourhood/suburb
+    const suburb = a.neighbourhood || a.suburb || a.quarter || a.hamlet || '';
+    // Layer 2: city/town/village
+    const city = a.city || a.town || a.village || a.municipality || a.county || '';
+    // Layer 3: state (abbreviated)
+    const state = a.state || '';
+    // Build: "Banjara Hills, Hyderabad" or "Hyderabad, Telangana" depending on what's available
+    let locationStr = '';
+    if (suburb && city) locationStr = \`\${suburb}, \${city}\`;
+    else if (city && state) locationStr = \`\${city}, \${state}\`;
+    else locationStr = city || suburb || state || 'Your Location';
+    data._location = locationStr;
 
     renderWeather(data);
     checkAlerts(data);
@@ -435,7 +506,7 @@ async function fetchWeather() {
 
 function loadMockData() {
   const mock = {
-    _location: 'Hyderabad, IN',
+    _location: 'Banjara Hills, Hyderabad',
     current: {
       temperature_2m: 31, apparent_temperature: 35, relative_humidity_2m: 65,
       precipitation: 0, weather_code: 2, wind_speed_10m: 18, wind_direction_10m: 220,
@@ -494,6 +565,7 @@ function renderWeather(d) {
   const hum = c.relative_humidity_2m;
   document.getElementById('humidity').textContent = hum;
   document.getElementById('humidity-bar').style.width = hum + '%';
+  document.getElementById('humidity-status').textContent = hum < 30 ? 'Dry' : hum < 50 ? 'Comfortable' : hum < 70 ? 'Moderate' : hum < 85 ? 'Humid' : 'Very Humid';
 
   // Wind
   const ws = c.wind_speed_10m;
@@ -502,12 +574,15 @@ function renderWeather(d) {
   document.getElementById('wind-unit').textContent = isCelsius ? ' km/h' : ' mph';
   document.getElementById('wind-dir-arrow').style.transform = \`rotate(\${wd}deg)\`;
   document.getElementById('wind-dir-text').textContent = degToDir(wd);
+  document.getElementById('wind-status').textContent = ws < 10 ? 'Calm' : ws < 30 ? 'Breeze' : ws < 50 ? 'Moderate' : ws < 70 ? 'Strong' : '⚠ Storm';
 
   // Visibility
   const vis = (c.visibility || 0) / 1000;
   document.getElementById('visibility').textContent = isCelsius ? vis.toFixed(1) : (vis * 0.621).toFixed(1);
   document.getElementById('vis-unit').textContent = isCelsius ? ' km' : ' mi';
   document.getElementById('vis-bar').style.width = Math.min(100, (vis / 20) * 100) + '%';
+  document.getElementById('vis-max').textContent = isCelsius ? '20 km' : '12 mi';
+  document.getElementById('vis-status').textContent = vis < 1 ? '⚠ Dense fog' : vis < 4 ? 'Poor' : vis < 10 ? 'Moderate' : 'Clear';
 
   // Pressure
   document.getElementById('pressure').textContent = Math.round(c.surface_pressure);
@@ -520,6 +595,7 @@ function renderWeather(d) {
   document.getElementById('uv-label').textContent = uvLabel(uv);
   document.getElementById('uv-bar').style.width = Math.min(100, (uv / 12) * 100) + '%';
   document.getElementById('uv-bar').style.background = uv > 7 ? 'var(--danger)' : uv > 3 ? 'var(--aurora-3)' : 'var(--safe)';
+  document.getElementById('uv-status').textContent = uv < 3 ? 'Safe' : uv < 6 ? 'Moderate' : uv < 8 ? 'High' : uv < 11 ? '⚠ V.High' : '🚨 Extreme';
 
   // Dew point
   const dew = d.hourly?.dew_point_2m?.[hour] ?? 0;
@@ -564,12 +640,13 @@ function uvLabel(uv) {
 // ============================================================
 function renderAQI(val) {
   let color, label, emoji;
-  if(val<=50){color='#06d6a0';label='Good — Air quality is satisfactory';emoji='😊';}
-  else if(val<=100){color='#ffd166';label='Moderate — Acceptable air quality';emoji='😐';}
-  else if(val<=150){color='#f4a261';label='Unhealthy for sensitive groups';emoji='😷';}
-  else if(val<=200){color='#e63946';label='Unhealthy — Everyone may be affected';emoji='🤒';}
-  else{color='#6a0572';label='Hazardous — Health alert!';emoji='☠️';}
+  if(val<=50) { color='#06d6a0'; label='Good — Air quality is satisfactory'; emoji='😊'; }
+  else if(val<=100) { color='#ffd166'; label='Moderate — Acceptable for most people'; emoji='😐'; }
+  else if(val<=150) { color='#f4a261'; label='Unhealthy for sensitive groups'; emoji='😷'; }
+  else if(val<=200) { color='#e63946'; label='Unhealthy — Everyone may be affected'; emoji='🤒'; }
+  else { color='#6a0572'; label='Hazardous — Health alert!'; emoji='☠️'; }
 
+  // Swatch + number
   document.getElementById('aqi-val').textContent = val;
   document.getElementById('aqi-label').textContent = label;
   const sw = document.getElementById('aqi-swatch');
@@ -577,11 +654,43 @@ function renderAQI(val) {
   sw.style.color = color;
   sw.textContent = emoji;
 
-  // Fake pollutant breakdown
-  document.getElementById('pm25').textContent = (val * 0.35 + Math.random()*5).toFixed(1);
-  document.getElementById('pm10').textContent = (val * 0.6 + Math.random()*8).toFixed(1);
-  document.getElementById('no2').textContent = (val * 0.25 + Math.random()*4).toFixed(1);
-  document.getElementById('o3').textContent = (val * 0.4 + Math.random()*6).toFixed(1);
+  // Needle position on gradient bar: 0–300 AQI maps to 0–100%
+  const needlePct = Math.min(100, (val / 300) * 100);
+  const needle = document.getElementById('aqi-needle');
+  needle.style.left = needlePct + '%';
+  needle.style.background = color;
+
+  // Pollutant values (simulated proportional to AQI)
+  const pm25v  = parseFloat((val * 0.35 + Math.random()*5).toFixed(1));
+  const pm10v  = parseFloat((val * 0.60 + Math.random()*8).toFixed(1));
+  const no2v   = parseFloat((val * 0.25 + Math.random()*4).toFixed(1));
+  const o3v    = parseFloat((val * 0.40 + Math.random()*6).toFixed(1));
+
+  // WHO safe limits: PM2.5=25, PM10=50, NO2=40, O3=100 μg/m³
+  // Bar fill = value / (2 × safe limit) → 50% fill = at safe limit, >50% = over limit
+  function pollutantColor(v, limit) {
+    if(v <= limit * 0.75) return '#06d6a0';
+    if(v <= limit)        return '#ffd166';
+    if(v <= limit * 1.5)  return '#f4a261';
+    return '#e63946';
+  }
+  function barPct(v, limit) { return Math.min(100, (v / (limit * 2)) * 100).toFixed(1); }
+
+  document.getElementById('pm25').textContent = pm25v;
+  document.getElementById('pm25-bar').style.width = barPct(pm25v, 25) + '%';
+  document.getElementById('pm25-bar').style.background = pollutantColor(pm25v, 25);
+
+  document.getElementById('pm10').textContent = pm10v;
+  document.getElementById('pm10-bar').style.width = barPct(pm10v, 50) + '%';
+  document.getElementById('pm10-bar').style.background = pollutantColor(pm10v, 50);
+
+  document.getElementById('no2').textContent = no2v;
+  document.getElementById('no2-bar').style.width = barPct(no2v, 40) + '%';
+  document.getElementById('no2-bar').style.background = pollutantColor(no2v, 40);
+
+  document.getElementById('o3').textContent = o3v;
+  document.getElementById('o3-bar').style.width = barPct(o3v, 100) + '%';
+  document.getElementById('o3-bar').style.background = pollutantColor(o3v, 100);
 }
 
 // ============================================================
