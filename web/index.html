@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>SkyPulse Weather</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header>
+  <button class="place-btn" id="place-btn" aria-label="Change location">
+    <span class="place-name"><span id="place-name">Locating…</span></span>
+    <span class="place-sub" id="place-sub">SkyPulse Weather</span>
+  </button>
+  <button class="icon-btn" id="star-btn" aria-label="Save place">☆</button>
+  <button class="icon-btn" id="locate-btn" aria-label="Use my location">◎</button>
+  <button class="icon-btn" id="refresh-btn" aria-label="Refresh">⟳</button>
+  <button class="icon-btn" id="settings-btn" aria-label="Settings">⚙</button>
+</header>
+
+<main>
+  <!-- TODAY -->
+  <section class="page active" id="page-today">
+    <div class="wrap">
+      <div class="hero" id="hero"><div class="skel">Loading weather…</div></div>
+      <div class="alerts" id="alerts"></div>
+      <div class="card" id="nowcast-card">
+        <div class="card-h"><span class="card-t">Next 3 hours · precipitation</span></div>
+        <div id="nowcast"><div class="muted">Loading…</div></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="card-t">Next 24 hours</span><button class="link-btn" data-goto="forecast">Charts ›</button></div>
+        <div class="hstrip" id="hstrip"></div>
+      </div>
+      <div class="grid" id="details"></div>
+      <div class="card" id="aq-mini"></div>
+    </div>
+  </section>
+
+  <!-- FORECAST -->
+  <section class="page" id="page-forecast">
+    <div class="wrap">
+      <div class="card">
+        <div class="card-h"><span class="card-t">Hourly · 72 h</span><span class="muted" style="font-size:.72rem">Tap chart for values</span></div>
+        <div class="chips" id="hour-metrics"></div>
+        <div class="chart-wrap" style="margin-top:10px">
+          <div class="legend" id="hour-legend"></div>
+          <div class="chart-scroll" id="hour-scroll"><canvas id="hour-chart"></canvas></div>
+          <div class="tooltip" id="hour-tip"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="card-t">16-day forecast</span><span class="muted" style="font-size:.72rem">Tap a day for details</span></div>
+        <div id="daily"></div>
+      </div>
+      <div class="card" id="models-card">
+        <div class="card-h"><span class="card-t">Forecast models</span><div class="seg" id="model-metric"><button data-m="temp" class="active">Temp</button><button data-m="precip">Rain</button><button data-m="wind">Wind</button></div></div>
+        <div id="models-body">
+          <p class="card-note" style="margin-top:0">Compare ECMWF, GFS, ICON, GEM, JMA, UK Met Office and Météo-France side by side, the way Windy and Meteoblue do. Where the models agree, you can trust the forecast more.</p>
+          <button class="pill-btn" id="models-load" style="margin-top:10px">Compare 7 forecast models</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MAP -->
+  <section class="page" id="page-map">
+    <div id="map"></div>
+    <iframe id="windy-frame" class="hidden" title="Windy map" allow="geolocation"></iframe>
+    <div class="map-top">
+      <div class="chips" id="map-layers"></div>
+    </div>
+    <div class="map-side" id="map-side">
+      <button id="map-me" aria-label="Center on location">◎</button>
+      <button id="map-particles" class="on" aria-label="Toggle wind particles">〰</button>
+      <button id="map-zoom-in" aria-label="Zoom in">＋</button>
+      <button id="map-zoom-out" aria-label="Zoom out">－</button>
+    </div>
+    <div class="map-status" id="map-status"></div>
+    <div class="map-bottom" id="map-bottom">
+      <div class="map-legend" id="map-legend"></div>
+      <div class="timebar">
+        <button class="play" id="map-play" aria-label="Play">▶</button>
+        <input type="range" id="map-time" min="0" max="47" value="0" step="1">
+        <span class="tl" id="map-tl">Now</span>
+      </div>
+    </div>
+    <div class="windy-sel hidden" id="windy-sel">
+      <div class="chips" id="windy-layers"></div>
+    </div>
+  </section>
+
+  <!-- AIR & SKY -->
+  <section class="page" id="page-sky">
+    <div class="wrap">
+      <div class="card" id="aq-card"><div class="muted">Loading air quality…</div></div>
+      <div class="card" id="aq-chart-card">
+        <div class="card-h"><span class="card-t">Air quality · next 4 days</span></div>
+        <div class="chart-wrap">
+          <div class="chart-scroll" id="aq-scroll"><canvas id="aq-chart"></canvas></div>
+          <div class="tooltip" id="aq-tip"></div>
+        </div>
+      </div>
+      <div class="card" id="pollen-card"></div>
+      <div class="card" id="sun-card"></div>
+      <div class="card" id="moon-card"></div>
+      <div class="card" id="marine-card"></div>
+      <div class="card" id="act-card"></div>
+    </div>
+  </section>
+
+  <!-- PLACES -->
+  <section class="page" id="page-places">
+    <div class="wrap">
+      <div class="search">
+        <span class="si">🔍</span>
+        <input id="search" type="search" placeholder="Search any city, town or place worldwide" autocomplete="off">
+      </div>
+      <div class="card hidden" id="results-card">
+        <div class="card-h"><span class="card-t">Search results</span></div>
+        <div class="plist" id="results"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="card-t">My places</span></div>
+        <div class="plist" id="saved"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="card-t">Around the world</span></div>
+        <div class="plist" id="world"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="today"><span class="ti">🌤️</span>Today</button>
+  <button class="tab" data-tab="forecast"><span class="ti">📈</span>Forecast</button>
+  <button class="tab" data-tab="map"><span class="ti">🗺️</span>Map</button>
+  <button class="tab" data-tab="sky"><span class="ti">🌬️</span>Air &amp; Sky</button>
+  <button class="tab" data-tab="places"><span class="ti">📍</span>Places</button>
+</nav>
+
+<div class="sheet-bg" id="sheet-bg"></div>
+<div class="sheet" id="settings-sheet">
+  <div class="grab"></div>
+  <h2>Settings</h2>
+  <div id="settings-rows"></div>
+  <p class="about">
+    SkyPulse Weather is free with no ads and no accounts. Forecasts come from <b>Open-Meteo</b> (ECMWF, GFS, ICON, GEM, JMA and other national models). Radar is from <b>RainViewer</b>, satellite imagery from <b>NASA GIBS</b>, and the interactive map from <b>Windy</b>.
+    Place search uses Open-Meteo Geocoding, and place names come from BigDataCloud and OpenStreetMap. US official alerts come from the National Weather Service.
+    The app works out the derived alerts, activity scores and sun and moon times on your device.
+    <br>Developed by Subrahmanyam · v2.0.0
+  </p>
+</div>
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="astro.js"></script>
+<script src="charts.js"></script>
+<script src="map.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

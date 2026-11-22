@@ -31,6 +31,10 @@ jobs:
       - name: Install npm dependencies
         run: npm install --legacy-peer-deps
 
+      # ── 3b. Inline web/ UI into src/weatherHtml.ts ────────────────
+      - name: Embed web UI
+        run: node scripts/embed-html.js
+
       # ── 4. Expo prebuild ──────────────────────────────────────────
       - name: Expo prebuild (clean)
         run: npx expo prebuild --clean --platform android
