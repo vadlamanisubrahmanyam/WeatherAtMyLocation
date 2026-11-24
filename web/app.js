@@ -119,19 +119,49 @@ function geolocate() {
       rej, { enableHighAccuracy: true, timeout: 12000, maximumAge: 300000 });
   });
 }
+// Clean admin-style names such as "Ward 93 Banjara Hills" -> "Banjara Hills"
+function cleanArea(x) {
+  if (!x) return '';
+  x = String(x).replace(/^ward\s*(no\.?)?\s*\d+\s*[-:,]?\s*/i, '').trim();
+  return /municipal|corporation|\bzone\b|mandal|tehsil|taluk|district/i.test(x) ? '' : x;
+}
+/** Returns { name, area, locality, city, state, admin, country }: area = part of the city, locality = finer neighbourhood. */
 async function reverseGeocode(lat, lon) {
+  const build = (area, locality, city, st, country) => {
+    area = cleanArea(area); locality = cleanArea(locality);
+    if (area && area === city) area = '';
+    if (!area && locality) { area = locality; locality = ''; }
+    if (locality === area) locality = '';
+    city = city || area || st || `${lat.toFixed(2)}°, ${lon.toFixed(2)}°`;
+    if (area === city) area = '';
+    return { name: area || city, area, locality, city, state: st || '', country: country || '',
+      admin: [area ? city : '', st].filter(Boolean).filter((x, k, a) => a.indexOf(x) === k).join(', ') };
+  };
+  try {
+    const j = await getJSON(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=17&accept-language=en`, 8000);
+    const a = j.address || {};
+    const city = a.city || a.town || a.village || a.municipality || a.state_district || a.county;
+    const area = a.suburb || a.quarter || a.city_district || a.hamlet;
+    const loc = a.neighbourhood || a.residential || '';
+    if (city || area) return build(area, loc, city, a.state, a.country);
+  } catch (e) { /* fall through */ }
   try {
     const j = await getJSON(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`, 8000);
-    const name = j.locality || j.city || j.principalSubdivision;
-    if (name) return { name, admin: [j.city !== name ? j.city : '', j.principalSubdivision].filter(Boolean).join(', '), country: j.countryName || '' };
+    const city = j.city || j.locality;
+    if (city) return build(j.locality !== city ? j.locality : '', '', city, j.principalSubdivision, j.countryName);
   } catch (e) { /* fall through */ }
-  try {
-    const j = await getJSON(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=14`, 8000);
-    const a = j.address || {};
-    const name = a.suburb || a.neighbourhood || a.city || a.town || a.village || a.county;
-    if (name) return { name, admin: [a.city || a.town || '', a.state || ''].filter((x) => x && x !== name).join(', '), country: a.country || '' };
-  } catch (e) { /* fall through */ }
-  return { name: `${lat.toFixed(2)}°, ${lon.toFixed(2)}°`, admin: '', country: '' };
+  return build('', '', '', '', '');
+}
+/** Display lines for a place: main ("Area, City"), sub (neighbourhood · state, country), plain text. */
+function placeLabel(p) {
+  if (p.city) {
+    return {
+      main: p.area ? `<b>${esc(p.area)}</b>, ${esc(p.city)}` : `<b>${esc(p.city)}</b>`,
+      sub: [p.locality, [p.state, p.country].filter(Boolean).join(', ')].filter(Boolean).join(' · '),
+      plain: p.area ? `${p.area}, ${p.city}` : p.city,
+    };
+  }
+  return { main: `<b>${esc(p.name || 'Unknown')}</b>`, sub: [p.admin, p.country].filter(Boolean).join(', '), plain: p.name || 'Unknown' };
 }
 async function useMyLocation() {
   setBusy(true);
@@ -143,7 +173,7 @@ async function useMyLocation() {
   } catch (e) {
     try {
       const j = await getJSON('https://get.geojs.io/v1/ip/geo.json', 8000);
-      p = { lat: +j.latitude, lon: +j.longitude, name: j.city || j.region, admin: j.region || '', country: j.country || '', current: true, approx: true };
+      p = { lat: +j.latitude, lon: +j.longitude, name: j.city || j.region, city: j.city || j.region, area: '', state: j.region || '', admin: j.region || '', country: j.country || '', current: true, approx: true };
       toast('GPS unavailable — using approximate location');
     } catch (e2) {
       p = store.get('lastPlace') || { lat: 17.385, lon: 78.487, name: 'Hyderabad', admin: 'Telangana', country: 'India' };
@@ -189,12 +219,17 @@ function setBusy(b) { $('#refresh-btn').classList.toggle('spin', b); }
 // ── Render: header ────────────────────────────────────
 function renderHeader() {
   const p = state.place;
-  $('#place-name').textContent = (p.current ? '📍 ' : '') + (p.name || 'Unknown');
-  $('#place-sub').textContent = [p.admin, p.country].filter(Boolean).join(', ') || `${p.lat.toFixed(2)}°, ${p.lon.toFixed(2)}°`;
+  const lb = placeLabel(p);
+  // Header stays short (area on top, city/state below); the hero card shows the full location.
+  $('#place-name').textContent = (p.current ? '📍 ' : '') + (p.city ? (p.area || p.city) : lb.plain);
+  $('#place-sub').textContent = (p.city ? [p.area ? p.city : '', p.state, p.country].filter(Boolean).join(', ') : lb.sub) || `${p.lat.toFixed(2)}°, ${p.lon.toFixed(2)}°`;
   const isSaved = saved.some((s) => near(s, p));
-  $('#star-btn').textContent = isSaved ? '★' : '☆';
   $('#star-btn').classList.toggle('on', isSaved);
+  $('#star-btn').setAttribute('aria-label', isSaved ? 'Remove from My places' : 'Save to My places');
+  const hs = $('#hero-save');
+  if (hs) { hs.classList.toggle('on', isSaved); hs.innerHTML = STAR_SVG + (isSaved ? 'Saved' : 'Save'); }
 }
+const STAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4L2.8 9.5l6.4-.8z"/></svg>';
 const near = (a, b) => Math.abs(a.lat - b.lat) < 0.02 && Math.abs(a.lon - b.lon) < 0.02;
 
 function renderAll() {
@@ -211,7 +246,15 @@ function renderToday() {
   const w = wmo(c.weather_code, c.is_day);
   const hero = $('#hero');
   hero.className = 'hero ' + heroClass(c.weather_code, c.is_day);
+  const lb = placeLabel(state.place);
   hero.innerHTML = `
+    <div class="hero-loc">
+      <div style="min-width:0">
+        <div class="hl-main">${state.place.current ? '📍 ' : ''}${lb.main}</div>
+        <div class="hl-sub">${esc(lb.sub)}${state.place.approx ? ' · approximate location' : ''}</div>
+      </div>
+      <button class="save-chip" id="hero-save" onclick="toggleSave()"></button>
+    </div>
     <div class="hero-top">
       <div>
         <div class="hero-temp num">${U.t(c.temperature_2m)}</div>
@@ -223,6 +266,7 @@ function renderToday() {
     <div class="hero-summary">${esc(daySummary(wx))}</div>
     <div class="hero-foot"><span>Local time ${hm(locNow(wx))} (${esc(wx.timezone_abbreviation || wx.timezone)})</span><span>Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>`;
 
+  renderHeader(); // fills the hero save chip
   renderAlerts();
   renderNowcast();
 
@@ -789,7 +833,7 @@ function toggleSave() {
   const p = state.place; if (!p) return;
   const i = saved.findIndex((s) => near(s, p));
   if (i >= 0) { saved.splice(i, 1); toast('Removed from My places'); }
-  else { saved.push({ name: p.name, admin: p.admin, country: p.country, lat: p.lat, lon: p.lon }); toast('Saved to My places'); }
+  else { saved.push({ name: placeLabel(p).plain, area: p.area || '', locality: p.locality || '', city: p.city || '', state: p.state || '', admin: p.admin || '', country: p.country || '', lat: p.lat, lon: p.lon }); toast('Saved to My places'); }
   store.set('places', saved);
   renderHeader();
   if (state.tab === 'places') renderPlaces();

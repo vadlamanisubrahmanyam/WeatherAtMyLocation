@@ -58,6 +58,18 @@ header {
 }
 .icon-btn:active { background: var(--surface-2); }
 .icon-btn.on { color: var(--warning); }
+/* Save star: SVG so it renders the same on every Android font; white outline when unsaved, filled gold when saved */
+.icon-btn.star svg { width: 26px; height: 26px; fill: none; stroke: #ffffff; stroke-width: 2; stroke-linejoin: round; }
+.icon-btn.star.on svg { fill: var(--warning); stroke: var(--warning); }
+.hero-loc { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.12); }
+.hl-main { font-size: 1.02rem; color: var(--text-2); line-height: 1.3; }
+.hl-main b { color: var(--text); font-weight: 700; font-size: 1.2rem; }
+.hl-sub { font-size: 0.78rem; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+.save-chip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 20px; font-size: 0.82rem; font-weight: 700;
+  background: rgba(255,255,255,0.12); border: 1.5px solid rgba(255,255,255,0.6); color: #fff; }
+.save-chip svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linejoin: round; }
+.save-chip.on { background: var(--warning); border-color: var(--warning); color: #2a1d00; }
+.save-chip.on svg { fill: currentColor; }
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
